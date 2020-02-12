@@ -11,70 +11,90 @@ esl-client
 This project is a fork of the unmaintained, original project at
 <https://freeswitch.org/stash/projects/FS/repos/freeswitch-contrib/browse/dvarnes/java/esl-client>
 
-Status: In Progress...
+Status: done
 
 
-Example
+Inbound Example
 ------------------------------------------------------------------------------
 
 ```java
-package com.ecovate.freeswitch.lb;
+package org.freeswitch.esl.client;
 
-import com.google.common.base.Throwables;
 import org.freeswitch.esl.client.inbound.Client;
-import org.freeswitch.esl.client.inbound.IEslEventListener;
-import org.freeswitch.esl.client.internal.IModEslApi.EventFormat;
-import org.freeswitch.esl.client.outbound.Context;
-import org.freeswitch.esl.client.outbound.IClientHandler;
-import org.freeswitch.esl.client.outbound.IClientHandlerFactory;
-import org.freeswitch.esl.client.outbound.SocketClient;
 import org.freeswitch.esl.client.transport.event.EslEvent;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.net.InetSocketAddress;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
-public class FreeSwitchEventListener {
+public class ClientTest {
 
-  private static Logger logger = LoggerFactory.getLogger(FreeSwitchEventListener.class);
+    private static class DemoEventListener implements IEslEventListener {
 
-  public static void main(String[] args) {
-    try {
-
-      final Client inboudClient = new Client();
-      inboudClient.connect(new InetSocketAddress("localhost", 8021), "ClueCon", 10);
-      inboudClient.addEventListener(new IEslEventListener() {
         @Override
-        public void onEslEvent(EslEvent eslEvent) {
-
+        public void eventReceived(EslEvent event) {
+            System.out.println("eventReceived:" + event.getEventName());
         }
-      });
-      inboudClient.setEventSubscriptions(EventFormat.PLAIN, "all");
 
-      final SocketClient outboundServer = new SocketClient(
-        new InetSocketAddress("localhost", 8084),
-        new IClientHandlerFactory() {
-          @Override
-          public IClientHandler createClientHandler() {
-            return new IClientHandler() {
-              @Override
-              public void handleEslEvent(Context context, EslEvent eslEvent) {
-              }
-
-              @Override
-              public void onConnect(Context context, EslEvent eslEvent) {
-              }
-            };
-          }
-        });
-
-
-    } catch (Throwable t) {
-      Throwables.propagate(t);
+        @Override
+        public void backgroundJobResultReceived(EslEvent event) {
+            System.out.println("backgroundJobResultReceived:" + event.getEventName());
+        }
     }
-  }
 
+    public static void main(String[] args) throws InterruptedException {
+        String host = "localhost";
+        int port = 8021;
+        String password = "ClueCon";
+        int timeoutSeconds = 10;
+        Client inboundClient = new Client(2, 8);
+        try {
+            inboundClient.connect(host, port, password, timeoutSeconds);
+            inboundClient.addEventListener(new DemoEventListener());
+            inboundClient.setEventSubscriptions("plain", "all");
+        } catch (Exception e) {
+            System.out.println("connect fail");
+        }
+
+        //health-check
+        ScheduledExecutorService service = new ScheduledThreadPoolExecutor(1);
+        service.scheduleAtFixedRate(() -> {
+            System.out.println(System.currentTimeMillis() + " " + inboundClient.canSend());
+            if (!inboundClient.canSend()) {
+                try {
+                    //重连
+                    inboundClient.connect(host, port, password, timeoutSeconds);
+                    inboundClient.cancelEventSubscriptions();
+                    inboundClient.setEventSubscriptions("plain", "all");
+                } catch (Exception e) {
+                    System.out.println("connect fail");
+                }
+            }
+        }, 1, 500, TimeUnit.MILLISECONDS);
+
+        System.out.println("other process ...");
+    }
 }
+
+```
+
+Outbound Example
+------------------------------------------------------------------------------
+```java
+package org.freeswitch.esl.client;
+
+import org.freeswitch.esl.client.outbound.SocketClient;
+import org.freeswitch.esl.client.outbound.example.SimpleHangupPipelineFactory;
+
+public class SocketClientTest {
+
+    public static void main(String[] args) {
+        SocketClient client = new SocketClient(8086, new SimpleHangupPipelineFactory(), 2, 16);
+        client.start();
+        System.out.println("started ...");
+    }
+}
+
 ```
 
 Authors
@@ -84,6 +104,7 @@ Authors
 - [Dave Rusek](mailto:dave.rusek@readytalk.com)
 - [David Varnes](mailto:david.varnes@gmail.com) (original author)
 - [Tobias Bieniek](https://github.com/Turbo87)
+- [菩提树下的杨过](https://www.cnblogs.com/yjmyzz/)
 
 License
 ------------------------------------------------------------------------------

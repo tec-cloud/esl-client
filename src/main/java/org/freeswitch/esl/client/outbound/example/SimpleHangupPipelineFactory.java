@@ -13,24 +13,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.freeswitch.esl.client.inbound;
+package org.freeswitch.esl.client.outbound.example;
+
+import org.freeswitch.esl.client.outbound.AbstractOutboundClientHandler;
+import org.freeswitch.esl.client.outbound.AbstractOutboundPipelineFactory;
 
 /**
- * Checked exception to handle connection failures.
+ * Factory for the simple hangup handler
  * 
  * @author  david varnes
  */
-public class InboundConnectionFailure extends Exception
+public class SimpleHangupPipelineFactory extends AbstractOutboundPipelineFactory
 {
-    private static final long serialVersionUID = 1L;
 
-    public InboundConnectionFailure( String message )
+    @Override
+    protected AbstractOutboundClientHandler makeHandler()
     {
-        super( message );
+        return new SimpleHangupOutboundHandler();
     }
-    
-    public InboundConnectionFailure( String message, Throwable cause )
-    {
-        super( message, cause );
-    }
+
 }

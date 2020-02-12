@@ -13,24 +13,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.freeswitch.esl.client.inbound;
+package org.freeswitch.esl.client.internal;
+
+import org.freeswitch.esl.client.inbound.Client;
+import org.freeswitch.esl.client.transport.CommandResponse;
+import org.freeswitch.esl.client.transport.event.EslEvent;
 
 /**
- * Checked exception to handle connection failures.
+ * End users of the {@link Client} should not need to use this class. 
+ * <p>
+ * Allow client implementations to observe events arriving from the server.
  * 
  * @author  david varnes
  */
-public class InboundConnectionFailure extends Exception
+public interface IEslProtocolListener
 {
-    private static final long serialVersionUID = 1L;
-
-    public InboundConnectionFailure( String message )
-    {
-        super( message );
-    }
+    void authResponseReceived(CommandResponse response);
     
-    public InboundConnectionFailure( String message, Throwable cause )
-    {
-        super( message, cause );
-    }
+    void eventReceived(EslEvent event);
+    
+    void disconnected();
 }
