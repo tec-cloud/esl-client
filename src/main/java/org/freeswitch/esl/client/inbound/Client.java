@@ -17,10 +17,7 @@ package org.freeswitch.esl.client.inbound;
 
 import com.google.common.base.Throwables;
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.EventLoopGroup;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import org.freeswitch.esl.client.internal.Context;
@@ -39,26 +36,29 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Entry point to connect to a running FreeSWITCH Event Socket Library module, as a client.
+ * Entry point to connect to a running FreeSWITCH Event Socket Library module,
+ * as a client.
  * <p/>
- * This class provides what the FreeSWITCH documentation refers to as an 'Inbound' connection
- * to the Event Socket module. That is, with reference to the socket listening on the FreeSWITCH
- * server, this client occurs as an inbound connection to the server.
+ * This class provides what the FreeSWITCH documentation refers to as an
+ * 'Inbound' connection to the Event Socket module. That is, with reference to
+ * the socket listening on the FreeSWITCH server, this client occurs as an
+ * inbound connection to the server.
  * <p/>
- * See <a href="http://wiki.freeswitch.org/wiki/Mod_event_socket">http://wiki.freeswitch.org/wiki/Mod_event_socket</a>
+ * See <a href=
+ * "http://wiki.freeswitch.org/wiki/Mod_event_socket">http://wiki.freeswitch.org/wiki/Mod_event_socket</a>
  */
 public class Client implements IModEslApi {
 
 	private final Logger log = LoggerFactory.getLogger(this.getClass());
 	private final List<IEslEventListener> eventListeners = new CopyOnWriteArrayList<>();
 	private final AtomicBoolean authenticatorResponded = new AtomicBoolean(false);
-	private final ConcurrentHashMap<String, CompletableFuture<EslEvent>> backgroundJobs =
-			new ConcurrentHashMap<>();
+	private final ConcurrentHashMap<String, CompletableFuture<EslEvent>> backgroundJobs = new ConcurrentHashMap<>();
 
 	private boolean authenticated;
 	private CommandResponse authenticationResponse;
 	private Optional<Context> clientContext = Optional.empty();
 	private ExecutorService callbackExecutor = Executors.newSingleThreadExecutor();
+	private IEslConnectionListener connectionListener = null;
 
 	public void addEventListener(IEslEventListener listener) {
 		if (listener != null) {
@@ -66,11 +66,13 @@ public class Client implements IModEslApi {
 		}
 	}
 
+	public void addConnectionListener(IEslConnectionListener listener) {
+		connectionListener = listener;
+	}
+
 	@Override
 	public boolean canSend() {
-		return clientContext.isPresent()
-			&& clientContext.get().canSend()
-			&& authenticated;
+		return clientContext.isPresent() && clientContext.get().canSend() && authenticated;
 	}
 
 	private void checkConnected() {
@@ -84,15 +86,18 @@ public class Client implements IModEslApi {
 	}
 
 	/**
-	 * Attempt to establish an authenticated connection to the nominated FreeSWITCH ESL server socket.
-	 * This call will block, waiting for an authentication handshake to occur, or timeout after the
-	 * supplied number of seconds.
+	 * Attempt to establish an authenticated connection to the nominated FreeSWITCH
+	 * ESL server socket. This call will block, waiting for an authentication
+	 * handshake to occur, or timeout after the supplied number of seconds.
 	 *
 	 * @param clientAddress  a SocketAddress representing the endpoint to connect to
-	 * @param password       server event socket is expecting (set in event_socket_conf.xml)
-	 * @param timeoutSeconds number of seconds to wait for the server socket before aborting
+	 * @param password       server event socket is expecting (set in
+	 *                       event_socket_conf.xml)
+	 * @param timeoutSeconds number of seconds to wait for the server socket before
+	 *                       aborting
 	 */
-	public void connect(SocketAddress clientAddress, String password, int timeoutSeconds) throws InboundConnectionFailure {
+	public void connect(SocketAddress clientAddress, String password, int timeoutSeconds)
+			throws InboundConnectionFailure {
 		// If already connected, disconnect first
 		if (canSend()) {
 			close();
@@ -103,9 +108,7 @@ public class Client implements IModEslApi {
 		EventLoopGroup workerGroup = new NioEventLoopGroup();
 
 		// Configure this client
-		Bootstrap bootstrap = new Bootstrap()
-				.group(workerGroup)
-				.channel(NioSocketChannel.class)
+		Bootstrap bootstrap = new Bootstrap().group(workerGroup).channel(NioSocketChannel.class)
 				.option(ChannelOption.SO_KEEPALIVE, true);
 
 		// Add ESL handler and factory
@@ -121,6 +124,13 @@ public class Client implements IModEslApi {
 		}
 		// Did not timeout
 		final Channel channel = future.channel();
+
+		channel.closeFuture().addListener((ChannelFutureListener) channelFuture -> {
+			log.warn("Connection closed connect to [{}]", clientAddress);
+			clientContext = Optional.empty();
+		});
+
+
 		// But may have failed anyway
 		if (!future.isSuccess()) {
 			log.warn("Failed to connect to [{}]", clientAddress, future.cause());
@@ -132,7 +142,7 @@ public class Client implements IModEslApi {
 
 		log.info("Connected to {}", clientAddress);
 
-		//  Wait for the authentication handshake to call back
+		// Wait for the authentication handshake to call back
 		while (!authenticatorResponded.get()) {
 			try {
 				Thread.sleep(250);
@@ -151,10 +161,11 @@ public class Client implements IModEslApi {
 	}
 
 	/**
-	 * Sends a FreeSWITCH API command to the server and blocks, waiting for an immediate response from the
-	 * server.
+	 * Sends a FreeSWITCH API command to the server and blocks, waiting for an
+	 * immediate response from the server.
 	 * <p/>
-	 * The outcome of the command from the server is retured in an {@link EslMessage} object.
+	 * The outcome of the command from the server is retured in an
+	 * {@link EslMessage} object.
 	 *
 	 * @param command API command to send
 	 * @param arg     command arguments
@@ -167,11 +178,13 @@ public class Client implements IModEslApi {
 	}
 
 	/**
-	 * Submit a FreeSWITCH API command to the server to be executed in background mode. A synchronous
-	 * response from the server provides a UUID to identify the job execution results. When the server
-	 * has completed the job execution it fires a BACKGROUND_JOB Event with the execution results.<p/>
-	 * Note that this Client must be subscribed in the normal way to BACKGOUND_JOB Events, in order to
-	 * receive this event.
+	 * Submit a FreeSWITCH API command to the server to be executed in background
+	 * mode. A synchronous response from the server provides a UUID to identify the
+	 * job execution results. When the server has completed the job execution it
+	 * fires a BACKGROUND_JOB Event with the execution results.
+	 * <p/>
+	 * Note that this Client must be subscribed in the normal way to BACKGOUND_JOB
+	 * Events, in order to receive this event.
 	 *
 	 * @param command API command to send
 	 * @param arg     command arguments
@@ -184,15 +197,18 @@ public class Client implements IModEslApi {
 	}
 
 	/**
-	 * Set the current event subscription for this connection to the server.  Examples of the events
-	 * argument are:
+	 * Set the current event subscription for this connection to the server.
+	 * Examples of the events argument are:
+	 * 
 	 * <pre>
 	 *   ALL
 	 *   CHANNEL_CREATE CHANNEL_DESTROY HEARTBEAT
 	 *   CUSTOM conference::maintenance
 	 *   CHANNEL_CREATE CHANNEL_DESTROY CUSTOM conference::maintenance sofia::register sofia::expire
 	 * </pre>
-	 * Subsequent calls to this method replaces any previous subscriptions that were set.
+	 * 
+	 * Subsequent calls to this method replaces any previous subscriptions that were
+	 * set.
 	 * </p>
 	 * Note: current implementation can only process 'plain' events.
 	 *
@@ -207,6 +223,18 @@ public class Client implements IModEslApi {
 	}
 
 	/**
+	 * event not subscription.
+	 *
+	 * @param events { all | space separated list of events }
+	 * @return a {@link CommandResponse} with the server's response.
+	 */
+	@Override
+	public CommandResponse setEventNoSubscriptions(String events) {
+		checkConnected();
+		return clientContext.get().setEventNoSubscriptions(events);
+	}
+
+	/**
 	 * Cancel any existing event subscription.
 	 *
 	 * @return a {@link CommandResponse} with the server's response.
@@ -218,14 +246,15 @@ public class Client implements IModEslApi {
 	}
 
 	/**
-	 * Add an event filter to the current set of event filters on this connection. Any of the event headers
-	 * can be used as a filter.
+	 * Add an event filter to the current set of event filters on this connection.
+	 * Any of the event headers can be used as a filter.
 	 * </p>
-	 * Note that event filters follow 'filter-in' semantics. That is, when a filter is applied
-	 * only the filtered values will be received. Multiple filters can be added to the current
-	 * connection.
+	 * Note that event filters follow 'filter-in' semantics. That is, when a filter
+	 * is applied only the filtered values will be received. Multiple filters can be
+	 * added to the current connection.
 	 * </p>
 	 * Example filters:
+	 * 
 	 * <pre>
 	 *    eventHeader        valueToFilter
 	 *    ----------------------------------
@@ -244,7 +273,8 @@ public class Client implements IModEslApi {
 	}
 
 	/**
-	 * Delete an event filter from the current set of event filters on this connection.  See
+	 * Delete an event filter from the current set of event filters on this
+	 * connection. See
 	 *
 	 * @param eventHeader   to remove
 	 * @param valueToFilter to remove
@@ -257,8 +287,8 @@ public class Client implements IModEslApi {
 	}
 
 	/**
-	 * Send a {@link SendMsg} command to FreeSWITCH.  This client requires that the {@link SendMsg}
-	 * has a call UUID parameter.
+	 * Send a {@link SendMsg} command to FreeSWITCH. This client requires that the
+	 * {@link SendMsg} has a call UUID parameter.
 	 *
 	 * @param sendMsg a {@link SendMsg} with call UUID
 	 * @return a {@link CommandResponse} with the server's response.
@@ -267,6 +297,12 @@ public class Client implements IModEslApi {
 	public CommandResponse sendMessage(SendMsg sendMsg) {
 		checkConnected();
 		return clientContext.get().sendMessage(sendMsg);
+	}
+
+	@Override
+	public CompletableFuture<EslMessage> sendAsyncMessage(SendMsg sendMsg) {
+		checkConnected();
+		return clientContext.get().sendAsyncMessage(sendMsg);
 	}
 
 	/**
@@ -310,12 +346,11 @@ public class Client implements IModEslApi {
 			throw Throwables.propagate(t);
 		}
 
-
 	}
 
 	/*
-		*  Internal observer of the ESL protocol
-		*/
+	 * Internal observer of the ESL protocol
+	 */
 	private final IEslProtocolListener protocolListener = new IEslProtocolListener() {
 
 		@Override
@@ -324,19 +359,37 @@ public class Client implements IModEslApi {
 			authenticated = response.isOk();
 			authenticationResponse = response;
 			log.debug("Auth response success={}, message=[{}]", authenticated, response.getReplyText());
+
+			if (null != connectionListener)
+				try {
+					connectionListener.onauth(authenticated);
+				} catch (Throwable t) {
+					throw Throwables.propagate(t);
+				}
 		}
 
 		@Override
 		public void eventReceived(final Context ctx, final EslEvent event) {
 			log.debug("Event received [{}]", event);
 			for (final IEslEventListener listener : eventListeners) {
-				callbackExecutor.execute(() -> listener.onEslEvent(ctx, event));
+				if (null == callbackExecutor) {
+					listener.onEslEvent(ctx, event);
+				} else {
+					callbackExecutor.execute(() -> listener.onEslEvent(ctx, event));
+				}
 			}
 		}
 
 		@Override
 		public void disconnected() {
 			log.info("Disconnected ...");
+			clientContext = Optional.empty();
+			if (null != connectionListener)
+				try {
+					connectionListener.ondisconnected();
+				} catch (Throwable t) {
+					throw Throwables.propagate(t);
+				}
 		}
 	};
 }

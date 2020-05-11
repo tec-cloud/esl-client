@@ -16,6 +16,8 @@
 package org.freeswitch.esl.client.outbound;
 
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.handler.timeout.IdleState;
+import io.netty.handler.timeout.IdleStateEvent;
 import org.freeswitch.esl.client.internal.AbstractEslClientHandler;
 import org.freeswitch.esl.client.internal.Context;
 import org.freeswitch.esl.client.transport.event.EslEvent;
@@ -52,15 +54,16 @@ class OutboundClientHandler extends AbstractEslClientHandler {
 		// Have received a connection from FreeSWITCH server, send connect response
 		log.debug("Received new connection from server, sending connect message");
 
-		sendApiSingleLineCommand(ctx.channel(), "connect")
-				.thenAccept(response -> clientHandler.onConnect(
-						new Context(ctx.channel(), OutboundClientHandler.this),
-						new EslEvent(response, true)))
-				.exceptionally(throwable -> {
-					ctx.channel().close();
-					handleDisconnectionNotice();
-					return null;
-				});
+        sendApiSingleLineCommand(ctx.channel(), "connect")
+                .thenAccept(response ->
+                        callbackExecutor.execute(() -> clientHandler.onConnect(
+                                new Context(ctx.channel(), OutboundClientHandler.this),
+                                new EslEvent(response, true)))
+                ).exceptionally(throwable -> {
+            ctx.channel().close();
+            handleDisconnectionNotice();
+            return null;
+        });
 	}
 
 	@Override
@@ -79,4 +82,17 @@ class OutboundClientHandler extends AbstractEslClientHandler {
 	protected void handleDisconnectionNotice() {
 		log.debug("Received disconnection notice");
 	}
+
+	// Here is how we send out heart beat for idle to long
+	@Override
+	public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+		if (evt instanceof IdleStateEvent) {
+			IdleStateEvent event = (IdleStateEvent) evt;
+			if (event.state() == IdleState.ALL_IDLE) { // idle for no read and write
+				ctx.writeAndFlush("\r\n");
+			}
+		}
+	}
+
+
 }

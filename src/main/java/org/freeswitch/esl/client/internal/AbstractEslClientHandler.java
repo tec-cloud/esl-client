@@ -69,18 +69,27 @@ public abstract class AbstractEslClientHandler extends SimpleChannelInboundHandl
 
 	@Override
 	public void exceptionCaught(ChannelHandlerContext ctx, Throwable e) throws Exception {
-
+		Throwable cause = e.getCause() == null ?  e : e.getCause();
 		for (final CompletableFuture<EslMessage> apiCall : apiCalls) {
-			apiCall.completeExceptionally(e.getCause());
+			apiCall.completeExceptionally(cause);
 		}
 
 		for (final CompletableFuture<EslEvent> backgroundJob : backgroundJobs.values()) {
-			backgroundJob.completeExceptionally(e.getCause());
+			backgroundJob.completeExceptionally(cause);
 		}
 
 		ctx.close();
 
-		ctx.fireExceptionCaught(e);
+        if (e instanceof java.io.IOException                            ||  // Connection reset by peer, Broken pipe
+            e instanceof java.nio.channels.ClosedChannelException       ||
+            e instanceof io.netty.handler.codec.DecoderException        ||
+            e instanceof io.netty.handler.codec.CorruptedFrameException ||  // Bad WebSocket frame
+            e instanceof java.lang.IllegalArgumentException             ||  // Use https://... URL to connect to HTTP server
+            e instanceof javax.net.ssl.SSLException                     ||  // Use http://... URL to connect to HTTPS server
+            e instanceof io.netty.handler.ssl.NotSslRecordException )
+            log.debug("Caught Exception", e);  // Maybe client is bad
+		else
+			ctx.fireExceptionCaught(e);  // Maybe server is bad
 
 	}
 
