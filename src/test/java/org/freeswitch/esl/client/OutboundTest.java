@@ -1,19 +1,17 @@
+package org.freeswitch.esl.client;
+
 import com.google.common.base.Throwables;
 
 import org.freeswitch.esl.client.dptools.Execute;
 import org.freeswitch.esl.client.dptools.ExecuteException;
-import org.freeswitch.esl.client.inbound.Client;
 import org.freeswitch.esl.client.internal.Context;
 import org.freeswitch.esl.client.outbound.IClientHandler;
 import org.freeswitch.esl.client.outbound.SocketClient;
 import org.freeswitch.esl.client.transport.event.EslEvent;
-import org.freeswitch.esl.client.transport.message.EslHeaders.Name;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
-import java.util.List;
-import java.util.Map;
 
 public class OutboundTest {
     private static Logger logger = LoggerFactory.getLogger(OutboundTest.class);
